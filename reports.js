@@ -24,12 +24,18 @@ const reportRecords = () => data.attendance.filter(record => {
     (!from || record.date >= from) && (!to || record.date <= to);
 });
 const reportHeader = (title, session) => `<header class="report-header"><p class="report-institution">${reportEsc(reportById("reportInstitution").value || "Attendance Management System")}</p><h1>${title}</h1><p><strong>Class:</strong> ${reportEsc(session?.className || reportById("reportClass").value || "All classes")} &nbsp; <strong>Department:</strong> ${reportEsc(session?.department || reportById("reportDepartment").value)} &nbsp; <strong>Section:</strong> ${reportEsc(session?.section || reportById("reportSection").value || "All sections")}</p><p><strong>Subject:</strong> ${reportEsc(session?.subjectName || reportById("reportSubject").value || "All subjects")} &nbsp; <strong>Teacher:</strong> ${reportEsc(session?.teacherName || reportById("reportTeacher").value || "-")}</p><p><strong>Date:</strong> ${reportEsc(session?.date || "All dates")} &nbsp; <strong>Time:</strong> ${reportEsc(session?.startTime || "-")} - ${reportEsc(session?.endTime || "-")}</p></header>`;
-const reportFooter = () => `<footer class="report-footer">Generated on: ${new Date().toLocaleString()}<br><br>Teacher Signature: ____________________<br><br>Authorized Signature: ____________________</footer>`;
+const reportFooter = () => `<footer class="report-footer">Printed / shared at: ${new Date().toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" })}<br><br>Teacher Signature: ____________________<br><br>Authorized Signature: ____________________</footer>`;
 function reportTableRows(list, detailed) { return list.map(record => { const person = student(record.studentId); const session = reportSession(record.sessionId); return `<tr><td>${person?.rollNo || ""}</td><td>${reportEsc(person?.studentId || person?.id || record.studentId || "")}</td><td>${reportEsc(person?.name || "")}</td>${detailed ? `<td>${record.date}</td><td>${reportEsc(session?.subjectName || record.subjectName)}</td><td>${reportEsc(session?.teacherName || record.teacherName)}</td><td>${session?.startTime || session?.scheduledTime || ""}</td>` : ""}<td class="${record.status === "present" ? "good" : "bad"}">${record.status}</td><td>${record.markedTime || session?.markingTime || ""}</td></tr>`; }).join(""); }
 function makeReport() {
   const type = reportById("reportType").value;
   const allRecords = reportRecords();
   const firstSession = [...data.attendanceSessions].reverse().find(reportSessionMatches);
+  const subjectName = reportById("reportSubject").value.trim() || firstSession?.subjectName || "";
+  if (!subjectName) {
+    toast("Enter a subject name before printing the report.");
+    reportById("reportSubject").focus();
+    return false;
+  }
   const sessionRecords = firstSession ? allRecords.filter(record => record.sessionId === firstSession.id) : [];
   const list = ["class", "daily", "present"].includes(type) ? sessionRecords : allRecords;
   const summary = reportSummary(list);
@@ -54,10 +60,11 @@ function makeReport() {
   }
   reportById("reportPreview").innerHTML = reportHtml;
   reportById("reportStatus").textContent = `${list.length} records`;
+  return true;
 }
 function reportText() { const node = document.createElement("div"); node.innerHTML = reportHtml; return node.innerText.replace(/\n{3,}/g, "\n\n").trim(); }
 async function shareGeneratedReport() { makeReport(); const text = reportText(); if (navigator.share) await navigator.share({title:"Attendance Report",text}); else { await navigator.clipboard.writeText(text); toast("Share is not supported; report copied successfully."); } }
-function printGeneratedReport() { makeReport(); const printArea = reportById("printArea"); printArea.innerHTML = ""; printArea.innerHTML = reportHtml; document.body.classList.add("print-mode"); window.print(); setTimeout(() => { document.body.classList.remove("print-mode"); printArea.innerHTML = ""; }, 500); }
+function printGeneratedReport() { if (!makeReport()) return; const printArea = reportById("printArea"); printArea.innerHTML = ""; printArea.innerHTML = reportHtml; document.body.classList.add("print-mode"); window.print(); setTimeout(() => { document.body.classList.remove("print-mode"); printArea.innerHTML = ""; }, 500); }
 function exportGeneratedCsv() { const list = reportRecords(); const rows = list.map(item => { const person = student(item.studentId), session = reportSession(item.sessionId); return [person?.id, person?.rollNo, person?.name, session?.courseName, session?.subjectName, session?.className, session?.section, session?.teacherName, item.date, session?.scheduledTime, item.markedTime || session?.markingTime, item.status]; }); const csv = [["Student ID","Roll No","Student Name","Course","Subject","Class","Section","Teacher","Date","Scheduled Time","Marked Time","Status"], ...rows].map(row => row.map(value => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"})); link.download = "attendance-report.csv"; link.click(); }
 function populateReportStudents() { reportById("reportStudent").innerHTML = `<option value="all">All Students</option>${data.students.map(item => `<option value="${item.id}">${item.rollNo}. ${reportEsc(item.name)}</option>`).join("")}`; }
 document.addEventListener("DOMContentLoaded", () => { populateReportStudents(); reportById("generateReport").onclick = makeReport; reportById("printReport").onclick = printGeneratedReport; reportById("pdfReport").onclick = printGeneratedReport; reportById("shareReport").onclick = shareGeneratedReport; reportById("copyReport").onclick = async () => { makeReport(); await navigator.clipboard.writeText(reportText()); toast("Report copied successfully"); }; reportById("sharePresent").onclick = async () => { reportById("reportType").value = "present"; await shareGeneratedReport(); }; reportById("exportReport").onclick = exportGeneratedCsv; document.querySelector('[data-page="reports"]')?.addEventListener("click", populateReportStudents); });

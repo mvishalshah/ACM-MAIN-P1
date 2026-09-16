@@ -1,5 +1,6 @@
 ﻿const KEY = "weightedAttendanceTracker_v2";
 const BACKUP_INFO_KEY = "weightedAttendanceTracker_backupInfo";
+const BACKUP_SNAPSHOT_KEY = "weightedAttendanceTracker_backupSnapshot";
 const BACKUP_VERSION = 1;
 const APP_NAME = "Weighted Attendance Tracker";
 let chart1, chart2, chart3, monthDate = new Date();
@@ -12,7 +13,7 @@ function defaultData() {
     courses: [],
     classes: [],
     sections: [],
-    subjects: [{ id: "math", name: "Mathematics", weight: 1 }, { id: "physics", name: "Physics", weight: 1 }, { id: "chem", name: "Chemistry", weight: 1 }],
+    subjects: [],
     teachers: [],
     timetable: [],
     attendanceSessions: [],
@@ -42,7 +43,7 @@ function normalizeData(raw) {
     courses: Array.isArray(incoming.courses) ? incoming.courses : [],
     classes: Array.isArray(incoming.classes) ? incoming.classes : [],
     sections: Array.isArray(incoming.sections) ? incoming.sections : [],
-    subjects: Array.isArray(incoming.subjects) && incoming.subjects.length ? incoming.subjects : base.subjects,
+    subjects: Array.isArray(incoming.subjects) ? incoming.subjects : base.subjects,
     teachers: Array.isArray(incoming.teachers) ? incoming.teachers : [],
     timetable: Array.isArray(incoming.timetable) ? incoming.timetable : [],
     attendance: Array.isArray(incoming.attendance) ? incoming.attendance : [],
@@ -57,7 +58,7 @@ function ensureDataShape() {
   data.settings = { ...defaultData().settings, ...(data.settings || {}) };
   data.students = Array.isArray(data.students) ? data.students : [];
   data.inactiveStudents = Array.isArray(data.inactiveStudents) ? data.inactiveStudents : [];
-  data.subjects = Array.isArray(data.subjects) && data.subjects.length ? data.subjects : defaultData().subjects;
+  data.subjects = Array.isArray(data.subjects) ? data.subjects : defaultData().subjects;
   data.courses = Array.isArray(data.courses) ? data.courses : [];
   data.classes = Array.isArray(data.classes) ? data.classes : [];
   data.sections = Array.isArray(data.sections) ? data.sections : [];
@@ -94,6 +95,7 @@ function saveData() {
   try {
     ensureDataShape();
     localStorage.setItem(KEY, JSON.stringify(data));
+    localStorage.setItem(BACKUP_SNAPSHOT_KEY, JSON.stringify(createBackupPayload()));
     setStatus("● Changes saved", "saved");
     return true;
   } catch (error) {
@@ -158,12 +160,26 @@ function renderDashboard() {
   const allPresent = data.attendance.filter((record) => record.status === "present").length;
   const allAbsent = data.attendance.filter((record) => record.status === "absent").length;
   const totalRecords = data.attendance.length;
+  const markedSubjectIds = new Set(data.attendanceSessions.map((session) => session.subjectId || session.subjectName).filter(Boolean));
   const avg = totalRecords ? pct(allPresent, totalRecords) : 0;
   const belowTarget = data.students.filter((student) => getStudentAttendance(student.id) < Number(data.settings.target || 0)).length;
+  const subjectStats = new Map();
+  data.attendanceSessions.forEach((session) => {
+    const subject = data.subjects.find((item) => item.id === session.subjectId);
+    const subjectName = session.subjectName || subject?.name || "Unnamed subject";
+    const key = session.subjectId || subjectName;
+    if (!subjectStats.has(key)) subjectStats.set(key, { name: subjectName, present: 0, absent: 0 });
+    const stats = subjectStats.get(key);
+    data.attendance.filter((record) => record.sessionId === session.id).forEach((record) => {
+      if (record.status === "present") stats.present += 1;
+      if (record.status === "absent") stats.absent += 1;
+    });
+  });
+  const subjectAnalysis = [...subjectStats.values()];
   const ids = ["totalStudents", "totalSubjects", "averageAttendance", "belowTarget", "presentToday", "absentToday"];
   const values = [
     totalStudents,
-    data.subjects.length,
+    markedSubjectIds.size,
     `${avg}%`,
     belowTarget,
     todayPresent,
@@ -175,8 +191,11 @@ function renderDashboard() {
   });
   const table = document.getElementById("dashboardTable");
   if (table) {
-    const cells = data.students.slice(0, 8).map((student) => `<tr><td>${escapeHtml(student.name || "Unnamed")}</td><td>${getStudentAttendance(student.id)}%</td></tr>`).join("");
-    table.innerHTML = `<div class="tablewrap"><table><thead><tr><th>Student</th><th>Attendance</th></tr></thead><tbody>${cells || '<tr><td colspan="2" class="empty">No students recorded</td></tr>'}</tbody></table></div>`;
+    const cells = subjectAnalysis.map((subject) => {
+      const total = subject.present + subject.absent;
+      return `<tr><td>${escapeHtml(subject.name)}</td><td>${total}</td><td>${subject.present}</td><td>${subject.absent}</td><td>${pct(subject.present, total)}%</td></tr>`;
+    }).join("");
+    table.innerHTML = `<div class="tablewrap"><table><thead><tr><th>Subject</th><th>Students</th><th>Present</th><th>Absent</th><th>Attendance</th></tr></thead><tbody>${cells || '<tr><td colspan="5" class="empty">No subject attendance recorded</td></tr>'}</tbody></table></div>`;
   }
   const chartCtx = document.getElementById("studentChart");
   if (chartCtx) {
@@ -193,13 +212,15 @@ function renderDashboard() {
   const distCtx = document.getElementById("distributionChart");
   if (distCtx) {
     if (chart2) chart2.destroy();
+    const subjectColors = ["#34d399", "#60a5fa", "#fbbf24", "#f472b6", "#a78bfa", "#fb923c", "#2dd4bf", "#f87171"];
+    const chartSubjects = subjectAnalysis.length ? subjectAnalysis : [{ name: "No marked subjects", present: 1 }];
     chart2 = new Chart(distCtx, {
       type: "doughnut",
       data: {
-        labels: ["Present", "Absent"],
-        datasets: [{ data: [allPresent, allAbsent], backgroundColor: ["#34d399", "#f87171"] }]
+        labels: chartSubjects.map((subject) => subject.name),
+        datasets: [{ data: chartSubjects.map((subject) => subject.present), backgroundColor: chartSubjects.map((subject, index) => subjectAnalysis.length ? subjectColors[index % subjectColors.length] : "#64748b") }]
       },
-      options: { responsive: true }
+      options: { responsive: true, plugins: { legend: { position: "bottom" } } }
     });
   }
   const trendCtx = document.getElementById("trendChart");
@@ -380,7 +401,9 @@ function renderStatistics() {
   renderDashboard();
 }
 function renderSubjectStatistics() {
-  // compatibility hook for project architecture.
+  const node = document.getElementById("subjectList");
+  if (!node) return;
+  node.innerHTML = data.subjects.length ? data.subjects.map((subject) => `<div class="panelhead"><div><strong>${escapeHtml(subject.name)}</strong><span class="small">Weight: ${escapeHtml(subject.weight)}</span></div><button type="button" class="row-btn danger" data-action="delete-subject" data-subject-id="${escapeHtml(subject.id)}">Delete</button></div>`).join("") : '<div class="empty">No subjects added yet. Add the subject before marking attendance.</div>';
 }
 function renderTargetCalculations() {
   // compatibility hook for project architecture.
@@ -412,6 +435,7 @@ function generateStudents(amount) {
   saveData();
   refreshApplicationUI();
   toast(`${count} students ready`);
+  showAttendanceSetupPrompt();
 }
 function showModal(title, html, actions) {
   const modal = document.getElementById("appModal");
@@ -429,6 +453,34 @@ function showModal(title, html, actions) {
     actionsContainer.appendChild(button);
   });
   modal.classList.add("open");
+}
+function showAttendanceSetupPrompt() {
+  showModal(
+    "Set Up Attendance",
+    `<p>Students are ready. Enter the subject and teacher before marking attendance.</p><div class="formgrid"><input id="nextSubjectName" placeholder="Subject name" required><input id="nextTeacherName" placeholder="Teacher name" required></div>`,
+    [{ label: "Later", action: "close", className: "ghost" }, { label: "Continue to Attendance", action: "continue-attendance-setup", className: "primary" }]
+  );
+}
+function continueToAttendanceSetup() {
+  const subjectName = document.getElementById("nextSubjectName")?.value.trim() || "";
+  const teacherName = document.getElementById("nextTeacherName")?.value.trim() || "";
+  if (!subjectName || !teacherName) {
+    toast("Subject name and teacher name are required.");
+    return;
+  }
+  let subject = data.subjects.find((item) => item.name.toLowerCase() === subjectName.toLowerCase());
+  if (!subject) {
+    subject = { id: uid(), name: subjectName, weight: 1 };
+    data.subjects.push(subject);
+  }
+  saveData();
+  closeModal();
+  document.querySelector('[data-page="attendance"]')?.click();
+  const teacherInput = document.getElementById("sessionTeacher");
+  if (teacherInput) teacherInput.value = teacherName;
+  const subjectSelect = document.getElementById("attendanceSubject");
+  if (subjectSelect) subjectSelect.value = subject.id;
+  toast("Attendance setup ready.");
 }
 function closeModal() {
   const modal = document.getElementById("appModal");
@@ -646,6 +698,10 @@ function handleModalAction(action) {
     if (pendingRestoreBackup) applyRestoredBackup(pendingRestoreBackup);
     return;
   }
+  if (action === "continue-attendance-setup") {
+    continueToAttendanceSetup();
+    return;
+  }
 }
 function parseCsvLine(line) {
   const cells = [];
@@ -769,8 +825,8 @@ function importStudentsFromCsv(file) {
       refreshApplicationUI();
       showModal(
         "CSV Import Complete",
-        `<p>New Students: <strong>${summary.newStudents}</strong></p><p>Updated Students: <strong>${summary.updatedStudents}</strong></p><p>Skipped/Duplicate: <strong>${summary.skippedDuplicates}</strong></p><p>Invalid Rows: <strong>${summary.invalidRows}</strong></p><p>Total Active Students: <strong>${data.students.length}</strong></p>`,
-        [{ label: "OK", action: "close", className: "primary" }]
+        `<p>New Students: <strong>${summary.newStudents}</strong></p><p>Updated Students: <strong>${summary.updatedStudents}</strong></p><p>Skipped/Duplicate: <strong>${summary.skippedDuplicates}</strong></p><p>Invalid Rows: <strong>${summary.invalidRows}</strong></p><p>Total Active Students: <strong>${data.students.length}</strong></p><hr><p>Next, enter the subject and teacher to start marking attendance.</p><div class="formgrid"><input id="nextSubjectName" placeholder="Subject name" required><input id="nextTeacherName" placeholder="Teacher name" required></div>`,
+        [{ label: "Later", action: "close", className: "ghost" }, { label: "Continue to Attendance", action: "continue-attendance-setup", className: "primary" }]
       );
       toast("CSV import complete");
     } catch (error) {
@@ -805,6 +861,7 @@ function attachEvents() {
   });
   document.getElementById("clearAllStudentsButton")?.addEventListener("click", openClearStudentsModal);
   document.getElementById("clearData")?.addEventListener("click", showClearApplicationDataModal);
+  document.getElementById("backupData")?.addEventListener("click", backupCurrentData);
   document.getElementById("backupCurrentData")?.addEventListener("click", backupCurrentData);
   document.getElementById("restoreData")?.addEventListener("change", (event) => {
     const file = event.target.files && event.target.files[0];
@@ -851,6 +908,36 @@ function attachEvents() {
     refreshApplicationUI();
     event.target.reset();
     toast("Student added");
+  });
+  document.getElementById("subjectForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = document.getElementById("subjectName")?.value.trim() || "";
+    const weight = Number(document.getElementById("subjectWeight")?.value || 0);
+    if (!name || weight <= 0) {
+      toast("Enter a subject name and a valid weight.");
+      return;
+    }
+    if (data.subjects.some((subject) => subject.name.toLowerCase() === name.toLowerCase())) {
+      toast("That subject already exists.");
+      return;
+    }
+    data.subjects.push({ id: uid(), name, weight });
+    saveData();
+    refreshApplicationUI();
+    event.target.reset();
+    toast("Subject added");
+  });
+  document.getElementById("subjectList")?.addEventListener("click", (event) => {
+    const button = event.target.closest('[data-action="delete-subject"]');
+    if (!button) return;
+    const subjectId = button.dataset.subjectId;
+    const subject = data.subjects.find((item) => item.id === subjectId);
+    if (!subject) return;
+    if (!window.confirm(`Delete subject "${subject.name}"? Saved attendance history will be kept.`)) return;
+    data.subjects = data.subjects.filter((item) => item.id !== subjectId);
+    saveData();
+    refreshApplicationUI();
+    toast("Subject deleted");
   });
   document.getElementById("studentList")?.addEventListener("click", (event) => {
     const button = event.target.closest("button");
