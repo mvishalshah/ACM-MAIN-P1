@@ -1,13 +1,3 @@
-# Weighted Attendance Tracker
-
-## Run in VS Code
-1. Extract this folder.
-2. Open the folder in VS Code.
-3. Install the **Live Server** extension.
-4. Right-click `index.html` → **Open with Live Server**.
-5. The app opens in your browser.
-
-You can also serve the folder with any simple local HTTP server.
 
 ## Features
 - Weekly timetable
@@ -27,4 +17,3 @@ You can also serve the folder with any simple local HTTP server.
 The app requests:
 `https://date.nager.at/api/v3/PublicHolidays/{YEAR}/IN`
 
-If the browser blocks the request in a particular environment, run through Live Server rather than opening the HTML with `file://`.
