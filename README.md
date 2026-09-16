@@ -28,3 +28,10 @@ The app requests:
 `https://date.nager.at/api/v3/PublicHolidays/{YEAR}/IN`
 
 If the browser blocks the request in a particular environment, run through Live Server rather than opening the HTML with `file://`.
+## Most imp. things is that ;
+- it does not store any data which makes the privacy more effective
+- also you can take backup of your current uppload data to make it in use in anytime in future by just restoring with provided file.
+- beleive me this is a perfect and helpful projects for CR, TEACHER, AND TEAMS..
+
+## my insta id is : @newvishal
+## my email: vishal.shah.main@gmail.com

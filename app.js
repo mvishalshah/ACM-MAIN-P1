@@ -1,1 +1,923 @@
-const KEY="weightedAttendanceTracker_v2";const defaults={settings:{year:new Date().getFullYear(),target:75},students:[],subjects:[{id:"math",name:"Mathematics",weight:1},{id:"physics",name:"Physics",weight:1},{id:"chem",name:"Chemistry",weight:1}],classes:[],sessions:[],attendance:[],holidays:{}};let data=JSON.parse(localStorage.getItem(KEY)||"null")||structuredClone(defaults);data.settings??=structuredClone(defaults.settings);data.students??=[];data.subjects??=[];data.classes??=[];data.sessions??=[];data.attendance=Array.isArray(data.attendance)?data.attendance:[];let chart1,chart2,chart3,monthDate=new Date();const $=id=>document.getElementById(id),uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2),save=()=>localStorage.setItem(KEY,JSON.stringify(data)),toast=m=>{const t=$("toast");t.textContent=m;t.style.display="block";setTimeout(()=>t.style.display="none",1800)},esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])),pct=(a,b)=>b?Math.round(a/b*1000)/10:0,today=()=>new Date().toISOString().slice(0,10),student=id=>data.students.find(s=>s.id===id),subject=id=>data.subjects.find(s=>s.id===id);function records(id){return data.attendance.filter(a=>!id||a.sessionId===id)}function sessionStats(id){const r=records(id),p=r.filter(a=>a.status==="present").length;return{total:r.length,present:p,absent:r.filter(a=>a.status==="absent").length,percent:pct(p,r.length)}}function generateStudents(n){n=Math.max(1,Math.min(200,Number(n)||0));if(n<=data.students.length)return toast("Reducing never deletes students; remove them manually");for(let i=data.students.length+1;i<=n;i++)data.students.push({id:"ST"+String(i).padStart(3,"0"),rollNo:i,name:`Student ${String(i).padStart(2,"0")}`,className:"Class 11",section:"A",contact:""});save();renderAll();toast(`${n} students ready`)}function stats(){let p=0,a=0,wp=0,wt=0;data.attendance.forEach(r=>{const s=subject(r.subjectId);if(!s)return;const w=Number(s.weight)||1;wt+=w;if(r.status==="present"){p++;wp+=w}if(r.status==="absent")a++});return{p,a,overall:pct(wp,wt)}}function renderDashboard(){const s=stats(),by=data.students.map(x=>{const r=data.attendance.filter(a=>a.studentId===x.id),p=r.filter(a=>a.status==="present").length;return{x,percent:pct(p,r.length)}});$("totalStudents").textContent=data.students.length;$("totalSubjects").textContent=data.subjects.length;$("averageAttendance").textContent=`${pct(by.reduce((a,x)=>a+x.percent,0),by.length)}%`;$("belowTarget").textContent=by.filter(x=>x.percent<data.settings.target).length;$("presentToday").textContent=data.attendance.filter(a=>a.date===today()&&a.status==="present").length;$("absentToday").textContent=data.attendance.filter(a=>a.date===today()&&a.status==="absent").length;$("dashboardTable").innerHTML=`<div class="tablewrap"><table><tr><th>Roll</th><th>Student</th><th>Attendance</th><th>Status</th></tr>${by.map(x=>`<tr><td>${x.x.rollNo}</td><td>${esc(x.x.name)}</td><td>${x.percent}%</td><td>${x.percent>=data.settings.target?"Above target":"Below target"}</td></tr>`).join("")}</table></div>`;[chart1,chart2,chart3].forEach(c=>c?.destroy());chart1=new Chart($("studentChart"),{type:"bar",data:{labels:by.map(x=>`#${x.x.rollNo}`),datasets:[{label:"Attendance %",data:by.map(x=>x.percent),backgroundColor:"#38bdf8"}]},options:{scales:{y:{min:0,max:100}}}});chart2=new Chart($("distributionChart"),{type:"doughnut",data:{labels:["Present","Absent"],datasets:[{data:[s.p,s.a],backgroundColor:["#36d399","#fb7185"]}]}});const dates=[...new Set(data.attendance.map(a=>a.date))].sort();chart3=new Chart($("trendChart"),{type:"line",data:{labels:dates,datasets:[{label:"Present",data:dates.map(d=>data.attendance.filter(a=>a.date===d&&a.status==="present").length),borderColor:"#fbbf24"}]}})}function renderStudents(){const q=$("studentSearch").value.toLowerCase();$("studentCountLabel").textContent=`${data.students.length} students`;$("studentList").innerHTML=`<div class="tablewrap"><table><tr><th>Roll</th><th>Name</th><th>Class</th><th>Section</th><th>Contact</th><th></th></tr>${data.students.filter(s=>`${s.rollNo} ${s.name}`.toLowerCase().includes(q)).map(s=>`<tr><td><input value="${s.rollNo}" onchange="editStudent('${s.id}','rollNo',this.value)"></td><td><input value="${esc(s.name)}" onchange="editStudent('${s.id}','name',this.value)"></td><td><input value="${esc(s.className)}" onchange="editStudent('${s.id}','className',this.value)"></td><td><input value="${esc(s.section)}" onchange="editStudent('${s.id}','section',this.value)"></td><td><input value="${esc(s.contact)}" onchange="editStudent('${s.id}','contact',this.value)"></td><td><button class="ghost" onclick="deleteStudent('${s.id}')">Delete</button></td></tr>`).join("")}</table></div>`}function editStudent(id,k,v){const s=student(id);if(s){s[k]=k==="rollNo"?Number(v):v.trim();save();renderAll()}}function deleteStudent(id){if(!confirm("Delete this student and their attendance?"))return;data.students=data.students.filter(s=>s.id!==id);data.attendance=data.attendance.filter(a=>a.studentId!==id);save();renderAll()}function renderSubjects(){$("subjectList").innerHTML=data.subjects.map(s=>`<div class="subjectrow"><b>${esc(s.name)}</b><span>Weight ${s.weight}</span><button class="ghost" onclick="deleteSubject('${s.id}')">Delete</button></div>`).join("");$("classSubject").innerHTML=data.subjects.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("")}function deleteSubject(id){if(data.classes.some(c=>c.subjectId===id))return toast("Remove timetable entries first");data.subjects=data.subjects.filter(s=>s.id!==id);save();renderAll()}function renderTimetable(){$("timetableList").innerHTML=data.classes.map(c=>`<div class="subjectrow"><b>${c.day} ${c.start}-${c.end||""}</b><span>${esc(c.course)} · ${esc(subject(c.subjectId)?.name||"")} · ${esc(c.teacher)}</span><button class="ghost" onclick="data.classes=data.classes.filter(x=>x.id!=='${c.id}');save();renderAll()">Delete</button></div>`).join("")}function renderAttendance(){if(!data.students.length)return $("attendanceList").innerHTML="<div class='empty'>Add students first.</div>";$("attendanceList").innerHTML=`<div class="tablewrap"><table><tr><th>Roll</th><th>Student</th><th>Status</th></tr>${data.students.map(s=>{const d=window.draft?.[s.id]||"unmarked";return`<tr><td>${s.rollNo}</td><td>${esc(s.name)}</td><td><select class="mark" data-id="${s.id}"><option value="unmarked" ${d==="unmarked"?"selected":""}>Not marked</option><option value="present" ${d==="present"?"selected":""}>Present</option><option value="absent" ${d==="absent"?"selected":""}>Absent</option></select></td></tr>`}).join("")}</table></div>`}function sessionForm(){return{id:uid(),courseName:$("sessionCourse").value.trim(),subjectName:$("sessionSubject").value.trim(),className:$("sessionClass").value.trim(),section:$("sessionSection").value.trim(),teacherName:$("sessionTeacher").value.trim(),room:$("sessionRoom").value.trim(),date:$("sessionDate").value,markingTime:$("sessionMarkingTime").value,scheduledTime:$("sessionScheduled").value,startTime:$("sessionStart").value,endTime:$("sessionEnd").value,type:$("sessionType").value}}function saveSession(){const s=sessionForm();if(!s.courseName||!s.subjectName||!s.className||!s.section||!s.teacherName||!s.date)return toast("Complete required session fields");const marks={};document.querySelectorAll(".mark").forEach(e=>marks[e.dataset.id]=e.value);const valid=data.students.filter(x=>["present","absent"].includes(marks[x.id]));if(!valid.length)return toast("Mark at least one student");data.sessions.push(s);valid.forEach(x=>data.attendance.push({id:uid(),studentId:x.id,sessionId:s.id,date:s.date,subjectId:data.subjects.find(y=>y.name.toLowerCase()===s.subjectName.toLowerCase())?.id||"",courseName:s.courseName,subjectName:s.subjectName,className:s.className,section:s.section,teacherName:s.teacherName,scheduledTime:s.scheduledTime,markedTime:s.markingTime,status:marks[x.id]}));save();window.draft={};renderAll();toast("Attendance saved")}function renderHistory(){const q=$("historySearch").value.toLowerCase();$("historyList").innerHTML=data.sessions.filter(s=>`${s.courseName} ${s.subjectName} ${s.teacherName}`.toLowerCase().includes(q)).map(s=>{const x=sessionStats(s.id);return`<div class="history-row"><div><b>${esc(s.subjectName)}</b><span>${esc(s.className)}-${esc(s.section)} · ${s.date} · ${s.startTime||s.scheduledTime||""}</span><span>${x.total} students · Present ${x.present} · Absent ${x.absent} · ${x.percent}%</span></div><div><button class="ghost" onclick="viewSession('${s.id}')">View</button><button class="ghost" onclick="printSession('${s.id}')">Print</button><button class="ghost" onclick="shareSession('${s.id}')">Share</button><button class="ghost" onclick="deleteSession('${s.id}')">Delete</button></div></div>`}).join("")||"<div class='empty'>No saved sessions.</div>"}function viewSession(id){const s=data.sessions.find(x=>x.id===id),x=sessionStats(id),r=records(id),present=r.filter(a=>a.status==="present");$("sessionView").innerHTML=`<h3>${esc(s.subjectName)} · ${s.date}</h3><p>${esc(s.courseName)} · ${esc(s.className)}-${esc(s.section)} · Teacher: ${esc(s.teacherName)}</p><p>Total ${x.total} · Present ${x.present} · Absent ${x.absent} · ${x.percent}%</p><h4>Present Students</h4><ol>${present.map(a=>`<li>${esc(student(a.studentId)?.name||"")}</li>`).join("")}</ol><button class="primary" onclick="copyPresent('${id}')">Copy Present Students</button><button class="ghost" onclick="exportSession('${id}')">Export CSV</button>`}function deleteSession(id){if(!confirm("Delete this attendance session?"))return;data.sessions=data.sessions.filter(s=>s.id!==id);data.attendance=data.attendance.filter(a=>a.sessionId!==id);save();renderAll()}function reportText(id){const s=data.sessions.find(x=>x.id===id),x=sessionStats(id),r=records(id),present=r.filter(a=>a.status==="present");return`Attendance Report\nCourse: ${s.courseName}\nSubject: ${s.subjectName}\nClass: ${s.className}-${s.section}\nTeacher: ${s.teacherName}\nDate: ${s.date}\nTime: ${s.startTime||s.scheduledTime||""} - ${s.endTime||""}\n\nPresent Students (${present.length}):\n${present.map((a,i)=>`${i+1}. ${student(a.studentId)?.name||""}`).join("\n")}\n\nTotal Students: ${x.total}\nPresent: ${x.present}\nAbsent: ${x.absent}\nAttendance: ${x.percent}%`}async function copyPresent(id){if(navigator.clipboard)await navigator.clipboard.writeText(reportText(id));toast("Report copied successfully")}async function shareSession(id){const text=reportText(id);if(navigator.share)await navigator.share({title:"Attendance Report",text});else await copyPresent(id)}function printSession(id){$("printArea").innerHTML=`<article>${reportText(id).replace(/\n/g,"<br>")}<hr>Teacher Signature: ____________________<br><br>Authorized Signature: ____________________</article>`;document.body.classList.add("print-mode");print();setTimeout(()=>document.body.classList.remove("print-mode"),500)}function exportSession(id){const rows=records(id).map(a=>{const s=student(a.studentId);return[s.id,s.rollNo,s.name,a.courseName,a.subjectName,a.className,a.section,a.teacherName,a.date,a.scheduledTime,a.markedTime,a.status]});const csv=[["Student ID","Roll No","Student Name","Course","Subject","Class","Section","Teacher","Date","Scheduled Time","Marked Time","Status"],...rows].map(r=>r.join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="attendance.csv";a.click()}function renderCalendar(){const y=monthDate.getFullYear(),m=monthDate.getMonth(),first=new Date(y,m,1),last=new Date(y,m+1,0),off=(first.getDay()+6)%7;$("monthTitle").textContent=monthDate.toLocaleDateString("en-US",{month:"long",year:"numeric"});let h=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(x=>`<b>${x}</b>`).join("");for(let i=0;i<off;i++)h+="<i></i>";for(let n=1;n<=last.getDate();n++){const d=new Date(y,m,n).toISOString().slice(0,10),r=data.attendance.filter(a=>a.date===d);h+=`<div class="calday"><b>${n}</b><span>${new Set(r.map(a=>a.sessionId)).size} sessions</span><span class="good">${r.filter(a=>a.status==="present").length} present</span><span class="bad">${r.filter(a=>a.status==="absent").length} absent</span></div>`}$("calendarGrid").innerHTML=h}function renderAll(){$("academicYear").value=data.settings.year;$("targetPct").value=data.settings.target;renderDashboard();renderStudents();renderSubjects();renderTimetable();renderAttendance();renderHistory();renderCalendar()}function showPage(p){document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.id===p));document.querySelectorAll(".nav").forEach(x=>x.classList.toggle("active",x.dataset.page===p));$("pageTitle").textContent=p[0].toUpperCase()+p.slice(1)}document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>showPage(b.dataset.page));$("studentSearch").oninput=renderStudents;$("historySearch").oninput=renderHistory;$("generateStudents").onclick=()=>generateStudents($("studentCount").value);$("studentForm").onsubmit=e=>{e.preventDefault();data.students.push({id:"ST"+uid(),rollNo:Number($("studentRoll").value),name:$("studentName").value.trim(),className:$("studentClass").value.trim(),section:$("studentSection").value.trim(),contact:$("studentContact").value.trim()});save();e.target.reset();renderAll()};$("subjectForm").onsubmit=e=>{e.preventDefault();data.subjects.push({id:uid(),name:$("subjectName").value.trim(),weight:Number($("subjectWeight").value)});save();e.target.reset();renderAll()};$("classForm").onsubmit=e=>{e.preventDefault();data.classes.push({id:uid(),day:$("classDay").value,start:$("classStart").value,end:$("classEnd").value,subjectId:$("classSubject").value,course:$("classCourse").value,teacher:$("classTeacher").value,room:$("classRoom").value});save();e.target.reset();renderAll()};$("markAllPresent").onclick=()=>{window.draft={};data.students.forEach(s=>window.draft[s.id]="present");renderAttendance()};$("markAllAbsent").onclick=()=>{window.draft={};data.students.forEach(s=>window.draft[s.id]="absent");renderAttendance()};$("resetMarks").onclick=()=>{window.draft={};renderAttendance()};$("saveAttendance").onclick=saveSession;$("historyAnalysis").onclick=()=>printSession(data.sessions[0]?.id);$("prevMonth").onclick=()=>{monthDate.setMonth(monthDate.getMonth()-1);renderCalendar()};$("nextMonth").onclick=()=>{monthDate.setMonth(monthDate.getMonth()+1);renderCalendar()};$("saveSettings").onclick=()=>{data.settings.year=Number($("academicYear").value);data.settings.target=Number($("targetPct").value);save();renderAll()};$("backupData").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));a.download="attendance-backup.json";a.click()};$("clearData").onclick=()=>{if(confirm("Clear all data?")){data=structuredClone(defaults);save();renderAll()}};$("importStudents").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{String(r.result).trim().split(/\r?\n/).slice(1).forEach((line,i)=>{const [rollNo,name,className,section,contact]=line.split(",");data.students.push({id:"ST"+uid(),rollNo:Number(rollNo)||i+1,name:name||`Student ${i+1}`,className:className||"Class 11",section:section||"A",contact:contact||""});});save();renderAll()};r.readAsText(f)};$("restoreData").onchange=e=>{const f=e.target.files[0],r=new FileReader();if(f){r.onload=()=>{data=JSON.parse(r.result);save();renderAll()};r.readAsText(f)}};renderAll();
+﻿const KEY = "weightedAttendanceTracker_v2";
+const BACKUP_INFO_KEY = "weightedAttendanceTracker_backupInfo";
+const BACKUP_VERSION = 1;
+const APP_NAME = "Weighted Attendance Tracker";
+let chart1, chart2, chart3, monthDate = new Date();
+let data = loadData();
+function defaultData() {
+  return {
+    settings: { year: new Date().getFullYear(), target: 75, dateFormat: "DD MMM YYYY" },
+    students: [],
+    inactiveStudents: [],
+    courses: [],
+    classes: [],
+    sections: [],
+    subjects: [{ id: "math", name: "Mathematics", weight: 1 }, { id: "physics", name: "Physics", weight: 1 }, { id: "chem", name: "Chemistry", weight: 1 }],
+    teachers: [],
+    timetable: [],
+    attendanceSessions: [],
+    attendance: [],
+    sessions: [],
+    holidays: {}
+  };
+}
+function loadData() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return normalizeData(parsed);
+  } catch (error) {
+    return normalizeData(null);
+  }
+}
+function normalizeData(raw) {
+  const base = defaultData();
+  const incoming = raw && typeof raw === "object" ? raw : {};
+  const next = {
+    ...base,
+    ...incoming,
+    settings: { ...base.settings, ...(incoming.settings || {}) },
+    students: Array.isArray(incoming.students) ? incoming.students : [],
+    inactiveStudents: Array.isArray(incoming.inactiveStudents) ? incoming.inactiveStudents : [],
+    courses: Array.isArray(incoming.courses) ? incoming.courses : [],
+    classes: Array.isArray(incoming.classes) ? incoming.classes : [],
+    sections: Array.isArray(incoming.sections) ? incoming.sections : [],
+    subjects: Array.isArray(incoming.subjects) && incoming.subjects.length ? incoming.subjects : base.subjects,
+    teachers: Array.isArray(incoming.teachers) ? incoming.teachers : [],
+    timetable: Array.isArray(incoming.timetable) ? incoming.timetable : [],
+    attendance: Array.isArray(incoming.attendance) ? incoming.attendance : [],
+    attendanceSessions: Array.isArray(incoming.attendanceSessions) ? incoming.attendanceSessions : (Array.isArray(incoming.sessions) ? incoming.sessions : []),
+    sessions: Array.isArray(incoming.attendanceSessions) ? incoming.attendanceSessions : (Array.isArray(incoming.sessions) ? incoming.sessions : []),
+    holidays: incoming.holidays && typeof incoming.holidays === "object" ? incoming.holidays : {}
+  };
+  return next;
+}
+function ensureDataShape() {
+  if (!data || typeof data !== "object") data = defaultData();
+  data.settings = { ...defaultData().settings, ...(data.settings || {}) };
+  data.students = Array.isArray(data.students) ? data.students : [];
+  data.inactiveStudents = Array.isArray(data.inactiveStudents) ? data.inactiveStudents : [];
+  data.subjects = Array.isArray(data.subjects) && data.subjects.length ? data.subjects : defaultData().subjects;
+  data.courses = Array.isArray(data.courses) ? data.courses : [];
+  data.classes = Array.isArray(data.classes) ? data.classes : [];
+  data.sections = Array.isArray(data.sections) ? data.sections : [];
+  data.teachers = Array.isArray(data.teachers) ? data.teachers : [];
+  data.timetable = Array.isArray(data.timetable) ? data.timetable : [];
+  data.attendance = Array.isArray(data.attendance) ? data.attendance : [];
+  data.attendanceSessions = Array.isArray(data.attendanceSessions) ? data.attendanceSessions : [];
+  data.sessions = Array.isArray(data.sessions) ? data.sessions : data.attendanceSessions;
+  data.holidays = data.holidays && typeof data.holidays === "object" ? data.holidays : {};
+  data.students.forEach((student, index) => {
+    student.studentId = student.studentId || student.id || `STU-${String(index + 1).padStart(3, "0")}`;
+    student.id = student.id || student.studentId;
+    student.status = student.status || (student.isActive === false ? "inactive" : "active");
+    student.className = student.className || "Unassigned";
+    student.section = student.section || "A";
+    student.classId = student.classId || [student.className, student.department || "", student.section, student.academicYear || ""].join("|").toLowerCase();
+  });
+}
+function setStatus(message, type = "saved") {
+  const statusNode = document.getElementById("dataStatus");
+  if (!statusNode) return;
+  statusNode.textContent = message;
+  statusNode.className = `data-status ${type}`;
+}
+function toast(message) {
+  const toastNode = document.getElementById("toast");
+  if (!toastNode) return;
+  toastNode.textContent = message;
+  toastNode.style.display = "block";
+  clearTimeout(toastNode._timer);
+  toastNode._timer = setTimeout(() => { toastNode.style.display = "none"; }, 2200);
+}
+function saveData() {
+  try {
+    ensureDataShape();
+    localStorage.setItem(KEY, JSON.stringify(data));
+    setStatus("● Changes saved", "saved");
+    return true;
+  } catch (error) {
+    setStatus("⚠ Unable to save changes", "error");
+    return false;
+  }
+}
+function saveAllData() {
+  return saveData();
+}
+function save() {
+  return saveData();
+}
+function records(sessionId) {
+  return data.attendance.filter((record) => record.sessionId === sessionId);
+}
+function student(studentId) {
+  return findStudentById(studentId);
+}
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+function formatDate(dateValue) {
+  const date = new Date(dateValue || Date.now());
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+function pct(a, b) {
+  return b ? Math.round((a / b) * 1000) / 10 : 0;
+}
+function getStudentAttendance(studentId) {
+  const list = data.attendance.filter((record) => record.studentId === studentId);
+  if (!list.length) return 0;
+  const present = list.filter((record) => record.status === "present").length;
+  return pct(present, list.length);
+}
+function findStudentById(studentId) {
+  return data.students.find((item) => item.id === studentId || item.studentId === studentId);
+}
+function updateBackupInfo() {
+  const node = document.getElementById("backupInfo");
+  if (!node) return;
+  const lastBackup = localStorage.getItem(BACKUP_INFO_KEY);
+  const formatted = lastBackup ? new Date(lastBackup).toLocaleString("en-GB", { day: "numeric", month: "long", year: "numeric", hour: "numeric", minute: "2-digit" }) : "No backup yet";
+  node.innerHTML = `<div>Last Backup: <strong>${escapeHtml(formatted)}</strong></div><div>Current Students: <strong>${data.students.length}</strong></div><div>Current Attendance Records: <strong>${data.attendance.length.toLocaleString()}</strong></div>`;
+}
+function renderDashboard() {
+  const totalStudents = data.students.length;
+  const todayPresent = data.attendance.filter((record) => record.date === today() && record.status === "present").length;
+  const todayAbsent = data.attendance.filter((record) => record.date === today() && record.status === "absent").length;
+  const allPresent = data.attendance.filter((record) => record.status === "present").length;
+  const allAbsent = data.attendance.filter((record) => record.status === "absent").length;
+  const totalRecords = data.attendance.length;
+  const avg = totalRecords ? pct(allPresent, totalRecords) : 0;
+  const belowTarget = data.students.filter((student) => getStudentAttendance(student.id) < Number(data.settings.target || 0)).length;
+  const ids = ["totalStudents", "totalSubjects", "averageAttendance", "belowTarget", "presentToday", "absentToday"];
+  const values = [
+    totalStudents,
+    data.subjects.length,
+    `${avg}%`,
+    belowTarget,
+    todayPresent,
+    todayAbsent
+  ];
+  ids.forEach((id, index) => {
+    const node = document.getElementById(id);
+    if (node) node.textContent = values[index];
+  });
+  const table = document.getElementById("dashboardTable");
+  if (table) {
+    const cells = data.students.slice(0, 8).map((student) => `<tr><td>${escapeHtml(student.name || "Unnamed")}</td><td>${getStudentAttendance(student.id)}%</td></tr>`).join("");
+    table.innerHTML = `<div class="tablewrap"><table><thead><tr><th>Student</th><th>Attendance</th></tr></thead><tbody>${cells || '<tr><td colspan="2" class="empty">No students recorded</td></tr>'}</tbody></table></div>`;
+  }
+  const chartCtx = document.getElementById("studentChart");
+  if (chartCtx) {
+    if (chart1) chart1.destroy();
+    chart1 = new Chart(chartCtx, {
+      type: "bar",
+      data: {
+        labels: ["Present", "Absent"],
+        datasets: [{ data: [todayPresent, todayAbsent], backgroundColor: ["#22c55e", "#f87171"] }]
+      },
+      options: { responsive: true, plugins: { legend: { display: false } } }
+    });
+  }
+  const distCtx = document.getElementById("distributionChart");
+  if (distCtx) {
+    if (chart2) chart2.destroy();
+    chart2 = new Chart(distCtx, {
+      type: "doughnut",
+      data: {
+        labels: ["Present", "Absent"],
+        datasets: [{ data: [allPresent, allAbsent], backgroundColor: ["#34d399", "#f87171"] }]
+      },
+      options: { responsive: true }
+    });
+  }
+  const trendCtx = document.getElementById("trendChart");
+  if (trendCtx) {
+    if (chart3) chart3.destroy();
+    const labels = [];
+    const valuesList = [];
+    for (let step = 5; step >= 0; step--) {
+      const date = new Date();
+      date.setDate(date.getDate() - step);
+      const iso = date.toISOString().slice(0, 10);
+      labels.push(date.toLocaleDateString("en-US", { month: "short", day: "numeric" }));
+      valuesList.push(data.attendance.filter((record) => record.date === iso && record.status === "present").length);
+    }
+    chart3 = new Chart(trendCtx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{ data: valuesList, borderColor: "#8b5cf6", backgroundColor: "rgba(139,92,246,0.2)", fill: true, tension: 0.35 }]
+      },
+      options: { responsive: true }
+    });
+  }
+}
+function renderStudents() {
+  const list = document.getElementById("studentList");
+  const count = document.getElementById("studentCountLabel");
+  if (count) count.textContent = `${data.students.length} students`;
+  if (!list) return;
+  const searchValue = (document.getElementById("studentSearch")?.value || "").toLowerCase();
+  const filtered = data.students.filter((student) => !searchValue || `${student.name || ""} ${student.rollNo || ""}`.toLowerCase().includes(searchValue));
+  list.innerHTML = filtered.length ? filtered.map((student) => `
+    <div class="student-row">
+      <div><strong>${escapeHtml(student.name || "Unnamed")}</strong><div class="small">ID: ${escapeHtml(student.studentId || student.id || "-")}</div></div>
+      <div><span class="small">Roll</span><br>${escapeHtml(student.rollNo || "-")}</div>
+      <div><span class="small">Class</span><br>${escapeHtml(student.className || "-")}</div>
+      <div><span class="small">Section</span><br>${escapeHtml(student.section || "-")}</div>
+      <div><span class="small">Contact</span><br>${escapeHtml(student.contact || "-")}</div>
+      <div class="student-actions">
+        <button class="row-btn" data-action="edit-student" data-student-id="${student.id}">Edit</button>
+        <button class="row-btn" data-action="toggle-student" data-student-id="${student.id}">${student.isActive === false ? "Activate" : "Deactivate"}</button>
+        <button class="row-btn danger" data-action="delete-student" data-student-id="${student.id}">Delete</button>
+      </div>
+    </div>
+  `).join("") : '<div class="empty">No students match the current search.</div>';
+}
+function getStudentStatus(student) {
+  return student?.status || (student?.isActive === false ? "inactive" : "active");
+}
+function getClassId(student) {
+  return student.classId || [student.className || "Unassigned", student.department || "", student.section || "A", student.academicYear || ""].join("|").toLowerCase();
+}
+function getStudentGroups() {
+  const groups = [];
+  const seen = new Set();
+  data.students.forEach((student) => {
+    const classId = `${student.className || "Unassigned"}|${student.section || "A"}`.toLowerCase();
+    if (seen.has(classId)) return;
+    seen.add(classId);
+    groups.push({ classId, className: student.className || "Unassigned", section: student.section || "A", department: student.department || "" });
+  });
+  return groups;
+}
+function renderAttendanceSelectors() {
+  const classSelect = document.getElementById("attendanceClass");
+  const sectionSelect = document.getElementById("attendanceSection");
+  const subjectSelect = document.getElementById("attendanceSubject");
+  if (!classSelect || !sectionSelect || !subjectSelect) return;
+  const groups = getStudentGroups();
+  const previousClass = classSelect.value;
+  classSelect.innerHTML = groups.map((group) => `<option value="${escapeHtml(group.classId)}">${escapeHtml(group.className)}${group.department ? ` · ${escapeHtml(group.department)}` : ""}</option>`).join("");
+  if (groups.some((group) => group.classId === previousClass)) classSelect.value = previousClass;
+  const selectedGroup = groups.find((group) => group.classId === classSelect.value) || groups[0];
+  const sections = [...new Set(data.students.filter((student) => `${student.className || "Unassigned"}|${student.section || "A"}`.toLowerCase().startsWith(`${selectedGroup?.className || ""}|`.toLowerCase())).map((student) => student.section || "A"))];
+  const previousSection = sectionSelect.value;
+  sectionSelect.innerHTML = sections.map((section) => `<option value="${escapeHtml(section)}">${escapeHtml(section)}</option>`).join("");
+  if (sections.includes(previousSection)) sectionSelect.value = previousSection;
+  subjectSelect.innerHTML = data.subjects.map((subject) => `<option value="${escapeHtml(subject.id)}">${escapeHtml(subject.name)}</option>`).join("");
+}
+function getCurrentAttendanceStudents() {
+  const classId = document.getElementById("attendanceClass")?.value || "";
+  const section = document.getElementById("attendanceSection")?.value || "";
+  return data.students.filter((student) => getStudentStatus(student) === "active" && `${student.className || "Unassigned"}|${student.section || "A"}`.toLowerCase() === `${classId}` && student.section === section);
+}
+function renderAttendanceCounters() {
+  const rows = [...document.querySelectorAll("#attendanceList .attendance-row")];
+  const present = rows.filter((row) => row.dataset.status === "present").length;
+  const absent = rows.filter((row) => row.dataset.status === "absent").length;
+  const totalNode = document.getElementById("attendanceTotal");
+  const presentNode = document.getElementById("attendancePresent");
+  const absentNode = document.getElementById("attendanceAbsent");
+  const percentageNode = document.getElementById("attendancePercentage");
+  if (totalNode) totalNode.textContent = rows.length;
+  if (presentNode) presentNode.textContent = present;
+  if (absentNode) absentNode.textContent = absent;
+  if (percentageNode) percentageNode.textContent = `${pct(present, rows.length)}%`;
+}
+function renderMarkAttendance() {
+  renderAttendanceSelectors();
+  const list = document.getElementById("attendanceList");
+  if (!list) return;
+  const previousMarks = Object.fromEntries([...list.querySelectorAll(".attendance-row")].map((row) => [row.dataset.studentId, row.dataset.status]));
+  const students = getCurrentAttendanceStudents();
+  list.innerHTML = students.length ? students.map((student) => {
+    const status = previousMarks[student.studentId] || "";
+    return `<div class="attendance-row" data-student-id="${escapeHtml(student.studentId)}" data-status="${escapeHtml(status)}"><span>${escapeHtml(student.rollNo || "-")}</span><span>${escapeHtml(student.studentId)}</span><strong>${escapeHtml(student.name || "Unnamed")}</strong><div class="attendance-actions"><button type="button" class="mini-btn ${status === "present" ? "selected" : ""}" data-attendance-status="present">Present</button><button type="button" class="mini-btn ${status === "absent" ? "selected" : ""}" data-attendance-status="absent">Absent</button></div></div>`;
+  }).join("") : `<div class="empty attendance-empty"><strong>No active students found for this class and section.</strong><div class="toolbar"><button type="button" class="ghost" data-go-students="true">Go to Students Management</button><button type="button" class="primary" data-go-students="true">Add Student</button></div></div>`;
+  renderAttendanceCounters();
+}
+function markVisibleAttendance(status) {
+  document.querySelectorAll("#attendanceList .attendance-row").forEach((row) => {
+    row.dataset.status = status;
+    row.querySelectorAll("[data-attendance-status]").forEach((button) => button.classList.toggle("selected", button.dataset.attendanceStatus === status));
+  });
+  renderAttendanceCounters();
+}
+function saveAttendanceSession() {
+  const rows = [...document.querySelectorAll("#attendanceList .attendance-row")];
+  const students = getCurrentAttendanceStudents();
+  if (!students.length) return toast("No active students found for this class and section.");
+  if (rows.some((row) => !row.dataset.status)) return toast("Mark Present or Absent for every student first.");
+  const classId = document.getElementById("attendanceClass")?.value || "";
+  const group = getStudentGroups().find((item) => item.classId === classId);
+  const subjectId = document.getElementById("attendanceSubject")?.value || "";
+  const subject = data.subjects.find((item) => item.id === subjectId);
+  const sessionId = `session-${uid()}`;
+  const session = { id: sessionId, sessionId, classId, className: group?.className || "", department: group?.department || "", section: document.getElementById("attendanceSection")?.value || "", subjectId, subjectName: subject?.name || "Subject", date: document.getElementById("sessionDate")?.value || today(), startTime: document.getElementById("sessionStart")?.value || "", endTime: document.getElementById("sessionEnd")?.value || "", teacherName: document.getElementById("sessionTeacher")?.value || "", room: document.getElementById("sessionRoom")?.value || "", markedAt: new Date().toISOString(), studentIdsSnapshot: students.map((student) => student.studentId), totalStudentsAtTime: students.length };
+  data.attendanceSessions.push(session);
+  data.sessions = data.attendanceSessions;
+  rows.forEach((row) => data.attendance.push({ sessionId, studentId: row.dataset.studentId, status: row.dataset.status, date: session.date, markedAt: session.markedAt }));
+  saveData();
+  refreshApplicationUI();
+  toast("Attendance saved successfully.");
+}
+function renderReportStudents() {
+  const select = document.getElementById("reportStudent");
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = `<option value="all">All Students</option>${data.students.map((student) => `<option value="${student.id}">${escapeHtml(student.rollNo || "")}. ${escapeHtml(student.name || "Unnamed")}</option>`).join("")}`;
+  if (current && data.students.some((student) => student.id === current)) select.value = current;
+}
+function renderClassSelectors() {
+  const classSubject = document.getElementById("classSubject");
+  if (classSubject) {
+    const currentValue = classSubject.value;
+    classSubject.innerHTML = data.subjects.map((subject) => `<option value="${subject.id}">${escapeHtml(subject.name)}</option>`).join("");
+    if (currentValue) classSubject.value = currentValue;
+  }
+}
+function renderCalendar() {
+  const node = document.getElementById("calendarGrid");
+  const title = document.getElementById("monthTitle");
+  if (!node || !title) return;
+  title.textContent = monthDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const firstDay = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+  const startOffset = (firstDay.getDay() + 6) % 7;
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  let html = days.map((label) => `<div class="calendar-day header">${label}</div>`).join("");
+  for (let dayIndex = 0; dayIndex < 42; dayIndex++) {
+    const current = new Date(monthDate.getFullYear(), monthDate.getMonth(), dayIndex - startOffset + 1);
+    const iso = current.toISOString().slice(0, 10);
+    const isCurrentMonth = current.getMonth() === monthDate.getMonth();
+    const isToday = iso === today();
+    const count = data.attendance.filter((record) => record.date === iso).length;
+    html += `<div class="calendar-day ${isCurrentMonth ? "" : "other-month"} ${isToday ? "today" : ""}"><div class="calendar-date">${current.getDate()}</div>${count ? `<div class="calendar-badge">${count}</div>` : ""}</div>`;
+  }
+  node.innerHTML = html;
+}
+function renderAttendanceHistory() {
+  const node = document.getElementById("historyList");
+  if (!node) return;
+  node.innerHTML = data.attendanceSessions.length ? data.attendanceSessions.slice().reverse().map((session) => {
+    const stats = { total: data.attendance.filter((record) => record.sessionId === session.id).length, present: data.attendance.filter((record) => record.sessionId === session.id && record.status === "present").length };
+    return `<div class="panel"><div class="panelhead"><h4>${escapeHtml(session.subjectName || "Subject")} · ${escapeHtml(session.className || "Class")} / ${escapeHtml(session.section || "")}</h4><span class="small">${stats.present}/${stats.total} present</span></div><div class="small">${escapeHtml(session.date || today())} · ${escapeHtml(session.teacherName || "Teacher")}</div></div>`;
+  }).join("") : '<div class="empty">No attendance history available.</div>';
+}
+function renderStatistics() {
+  renderDashboard();
+}
+function renderSubjectStatistics() {
+  // compatibility hook for project architecture.
+}
+function renderTargetCalculations() {
+  // compatibility hook for project architecture.
+}
+function refreshApplicationUI() {
+  ensureDataShape();
+  renderDashboard();
+  renderStudents();
+  renderReportStudents();
+  renderClassSelectors();
+  renderMarkAttendance();
+  renderAttendanceHistory();
+  renderCalendar();
+  renderStatistics();
+  renderSubjectStatistics();
+  renderTargetCalculations();
+  updateBackupInfo();
+}
+function generateStudents(amount) {
+  const count = Math.max(1, Math.min(200, Number(amount) || 0));
+  if (count <= data.students.length) {
+    toast("Reducing never deletes students; remove them manually.");
+    return;
+  }
+  for (let i = data.students.length + 1; i <= count; i++) {
+    const id = `ST${String(i).padStart(3, "0")}`;
+    data.students.push({ id, studentId: id, rollNo: i, name: `Student ${String(i).padStart(2, "0")}`, className: "B.Tech", section: "IT", contact: "", course: "", isActive: true });
+  }
+  saveData();
+  refreshApplicationUI();
+  toast(`${count} students ready`);
+}
+function showModal(title, html, actions) {
+  const modal = document.getElementById("appModal");
+  if (!modal) return;
+  document.getElementById("appModalTitle").textContent = title;
+  document.getElementById("appModalBody").innerHTML = html;
+  const actionsContainer = document.getElementById("appModalActions");
+  actionsContainer.innerHTML = "";
+  actions.forEach((action) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.className = action.className || "ghost";
+    button.dataset.action = action.action || "close";
+    actionsContainer.appendChild(button);
+  });
+  modal.classList.add("open");
+}
+function closeModal() {
+  const modal = document.getElementById("appModal");
+  if (modal) modal.classList.remove("open");
+}
+function openClearStudentsModal() {
+  showModal(
+    "Clear All Students?",
+    `<p>This will remove all currently active student records from the student list.</p><p>Your attendance history and backup files will not be automatically deleted.</p><p>Are you sure?</p>`,
+    [
+      { label: "Cancel", action: "close", className: "ghost" },
+      { label: "Clear Active Students", action: "delete-active-students", className: "danger" },
+      { label: "Clear All Student Records", action: "delete-all-student-records", className: "danger" }
+    ]
+  );
+}
+function clearActiveStudents() {
+  data.students = [];
+  saveData();
+  refreshApplicationUI();
+  closeModal();
+  toast("All active students cleared.");
+}
+function warnPermanentClear() {
+  showModal(
+    "This will permanently remove all student records from this browser.",
+    `<p>Make sure you have a backup first.</p>`,
+    [
+      { label: "Cancel", action: "close", className: "ghost" },
+      { label: "Continue", action: "confirm-clear-all-student-records", className: "danger" }
+    ]
+  );
+}
+function clearAllStudentRecords() {
+  data.students = [];
+  data.inactiveStudents = [];
+  saveData();
+  refreshApplicationUI();
+  closeModal();
+  toast("All student records cleared.");
+}
+function showClearApplicationDataModal() {
+  showModal(
+    "Clear All Application Data?",
+    `<p>This will permanently remove all application data, including students, classes, subjects, timetable, attendance sessions, attendance records, and settings.</p><p>Download a backup before continuing if you want to keep this data.</p>`,
+    [
+      { label: "Cancel", action: "close", className: "ghost" },
+      { label: "Download Backup First", action: "download-backup-then-clear", className: "primary" },
+      { label: "Clear All Data", action: "confirm-clear-all-data", className: "danger" }
+    ]
+  );
+}
+function clearAllApplicationData() {
+  data = normalizeData(defaultData());
+  saveData();
+  refreshApplicationUI();
+  closeModal();
+  toast("Application data cleared.");
+}
+function createBackupPayload() {
+  return {
+    appName: APP_NAME,
+    backupVersion: BACKUP_VERSION,
+    createdAt: new Date().toISOString(),
+    data: {
+      students: data.students,
+      inactiveStudents: data.inactiveStudents,
+      courses: data.courses,
+      classes: data.classes,
+      sections: data.sections,
+      subjects: data.subjects,
+      teachers: data.teachers,
+      timetable: data.timetable,
+      attendanceSessions: data.attendanceSessions,
+      attendance: data.attendance,
+      settings: data.settings,
+      holidays: data.holidays
+    }
+  };
+}
+function downloadBackupFile(payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", "-").replace(":", "").replace(":", "");
+  anchor.download = `attendance-backup-${stamp}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  localStorage.setItem(BACKUP_INFO_KEY, new Date().toISOString());
+  updateBackupInfo();
+}
+function backupCurrentData() {
+  const payload = createBackupPayload();
+  downloadBackupFile(payload);
+  toast("Backup downloaded successfully.");
+}
+function migrateBackup(backup) {
+  if (!backup || typeof backup !== "object") return null;
+  if (backup.backupVersion === 1) return backup;
+  return null;
+}
+function validateBackup(backup) {
+  if (!backup || typeof backup !== "object") throw new Error("Invalid backup format");
+  if (backup.appName !== APP_NAME) throw new Error("Invalid application identifier");
+  if (!Number.isInteger(backup.backupVersion) || backup.backupVersion !== BACKUP_VERSION) throw new Error("Unsupported backup version");
+  if (!backup.data || typeof backup.data !== "object") throw new Error("Missing backup data");
+  const keys = ["students", "inactiveStudents", "courses", "classes", "sections", "subjects", "teachers", "timetable", "attendanceSessions", "attendance", "settings"];
+  for (const key of keys) {
+    if (!(key in backup.data)) throw new Error(`Missing ${key}`);
+  }
+  for (const key of ["students", "inactiveStudents", "courses", "classes", "sections", "subjects", "teachers", "timetable", "attendanceSessions", "attendance"]) {
+    if (!Array.isArray(backup.data[key])) throw new Error(`${key} must be an array`);
+  }
+  if (!backup.data.settings || typeof backup.data.settings !== "object") throw new Error("Settings missing");
+  const validStudents = new Set(backup.data.students.filter((item) => item && item.id).map((item) => item.id));
+  const validSessions = new Set(backup.data.attendanceSessions.filter((item) => item && item.id).map((item) => item.id));
+  for (const record of backup.data.attendance) {
+    if (record.studentId && validStudents.size && !validStudents.has(record.studentId)) {
+      throw new Error("Attendance references an invalid student");
+    }
+    if (record.sessionId && validSessions.size && !validSessions.has(record.sessionId)) {
+      throw new Error("Attendance references an invalid session");
+    }
+  }
+  return true;
+}
+let pendingRestoreBackup = null;
+function showRestoreConfirmation(backup) {
+  const summary = {
+    students: backup.data.students.length,
+    classes: backup.data.classes.length,
+    subjects: backup.data.subjects.length,
+    sessions: backup.data.attendanceSessions.length,
+    attendance: backup.data.attendance.length
+  };
+  pendingRestoreBackup = backup;
+  showModal(
+    "Restore Backup?",
+    `<p>This backup contains:</p><p>Students: <strong>${summary.students}</strong> · Classes: <strong>${summary.classes}</strong> · Subjects: <strong>${summary.subjects}</strong></p><p>Attendance Sessions: <strong>${summary.sessions}</strong> · Attendance Records: <strong>${summary.attendance}</strong></p><p>Restoring this backup will replace the current application data.</p><p>It is recommended that you create a backup of your current data first.</p>`,
+    [
+      { label: "Cancel", action: "close", className: "ghost" },
+      { label: "Backup Current Data First", action: "backup-before-restore", className: "primary" },
+      { label: "Restore Backup", action: "confirm-restore-backup", className: "danger" }
+    ]
+  );
+}
+function restoreBackup(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const json = JSON.parse(String(reader.result || ""));
+      const migrated = migrateBackup(json);
+      validateBackup(migrated);
+      showRestoreConfirmation(migrated);
+    } catch (error) {
+      console.error(error);
+      showModal("Invalid or corrupted backup file.", "<p>Your current data has NOT been changed.</p>", [{ label: "OK", action: "close", className: "primary" }]);
+    }
+  };
+  reader.readAsText(file);
+}
+function applyRestoredBackup(backup) {
+  const migrated = migrateBackup(backup);
+  if (!migrated) {
+    showModal("Invalid or corrupted backup file.", "<p>Your current data has NOT been changed.</p>", [{ label: "OK", action: "close", className: "primary" }]);
+    return;
+  }
+  data = normalizeData(migrated.data);
+  saveData();
+  refreshApplicationUI();
+  closeModal();
+  showModal(
+    "Backup Restored Successfully",
+    `<p>Students: <strong>${data.students.length}</strong> · Classes: <strong>${data.classes.length}</strong> · Subjects: <strong>${data.subjects.length}</strong></p><p>Attendance Sessions: <strong>${data.attendanceSessions.length}</strong></p><p>All application data has been restored.</p>`,
+    [{ label: "OK", action: "close", className: "primary" }]
+  );
+  toast("Backup restored successfully.");
+}
+function handleModalAction(action) {
+  if (action === "close") {
+    closeModal();
+    return;
+  }
+  if (action === "delete-active-students") {
+    clearActiveStudents();
+    return;
+  }
+  if (action === "delete-all-student-records") {
+    warnPermanentClear();
+    return;
+  }
+  if (action === "confirm-clear-all-student-records") {
+    clearAllStudentRecords();
+    return;
+  }
+  if (action === "download-backup-then-clear") {
+    backupCurrentData();
+    showClearApplicationDataModal();
+    return;
+  }
+  if (action === "confirm-clear-all-data") {
+    clearAllApplicationData();
+    return;
+  }
+  if (action === "backup-before-restore") {
+    backupCurrentData();
+    closeModal();
+    return;
+  }
+  if (action === "confirm-restore-backup") {
+    if (pendingRestoreBackup) applyRestoredBackup(pendingRestoreBackup);
+    return;
+  }
+}
+function parseCsvLine(line) {
+  const cells = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const next = line[i + 1];
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current);
+  return cells.map((cell) => cell.trim());
+}
+function parseCsvText(text) {
+  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter((line) => line.trim().length > 0);
+  if (!lines.length) return [];
+  const headerLine = parseCsvLine(lines[0]);
+  return lines.slice(1).map((line) => {
+    const values = parseCsvLine(line);
+    const row = {};
+    headerLine.forEach((header, index) => {
+      row[header] = values[index] || "";
+    });
+    return row;
+  });
+}
+function normalizedKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+function candidateKey(student) {
+  return [student.studentId || student.id || "", student.rollNo || "", student.className || "", student.section || ""].map((value) => String(value).trim()).join("|");
+}
+function findDuplicateStudent(studentCandidate) {
+  const id = normalizedKey(studentCandidate.studentId || studentCandidate.id);
+  const roll = normalizedKey(studentCandidate.rollNo);
+  const className = normalizedKey(studentCandidate.className);
+  const section = normalizedKey(studentCandidate.section);
+  return data.students.find((student) => {
+    const sameId = id && normalizedKey(student.studentId || student.id) === id;
+    const sameRoll = roll && normalizedKey(student.rollNo) === roll && className && normalizedKey(student.className) === className && section && normalizedKey(student.section) === section;
+    return sameId || sameRoll;
+  }) || null;
+}
+function importStudentsFromCsv(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const rows = parseCsvText(String(reader.result || ""));
+      if (!rows.length) {
+        toast("CSV file is empty.");
+        return;
+      }
+      const fallback = {
+        course: data.settings.currentCourse || "",
+        className: data.settings.currentClass || "",
+        section: data.settings.currentSection || "",
+        department: data.settings.department || ""
+      };
+      const seen = new Set();
+      const summary = { newStudents: 0, updatedStudents: 0, skippedDuplicates: 0, invalidRows: 0 };
+      rows.forEach((row, index) => {
+        const normalized = {};
+        Object.keys(row).forEach((key) => {
+          normalized[normalizedKey(key)] = row[key];
+        });
+        const studentName = String(normalized.studentname || normalized.name || "").trim();
+        if (!studentName) {
+          summary.invalidRows += 1;
+          toast(`Row ${index + 2}: Student Name is missing.`);
+          return;
+        }
+        const candidate = {
+          id: String(normalized.studentid || normalized.studentidfield || normalized.id || "").trim() || `ST${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+          studentId: String(normalized.studentid || normalized.studentidfield || normalized.id || "").trim() || `ST${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+          rollNo: String(normalized.rollno || normalized.roll || normalized.rollnumber || ""),
+          name: studentName,
+          className: String(normalized.classname || normalized.class || fallback.className || "").trim(),
+          section: String(normalized.section || fallback.section || "").trim(),
+          course: String(normalized.course || fallback.course || "").trim(),
+          department: String(normalized.department || fallback.department || "").trim(),
+          contact: String(normalized.email || normalized.contact || normalized.phone || "").trim(),
+          isActive: true
+        };
+        const duplicateKey = candidateKey(candidate);
+        if (seen.has(duplicateKey)) {
+          summary.skippedDuplicates += 1;
+          return;
+        }
+        seen.add(duplicateKey);
+        const existing = findDuplicateStudent(candidate);
+        if (existing) {
+          existing.studentId = existing.studentId || candidate.studentId || existing.id;
+          existing.rollNo = existing.rollNo || candidate.rollNo || "";
+          existing.name = existing.name || candidate.name;
+          existing.className = candidate.className || existing.className || fallback.className || "";
+          existing.section = candidate.section || existing.section || fallback.section || "";
+          existing.course = candidate.course || existing.course || fallback.course || "";
+          existing.department = candidate.department || existing.department || fallback.department || "";
+          existing.contact = candidate.contact || existing.contact || "";
+          existing.isActive = existing.isActive !== false;
+          summary.updatedStudents += 1;
+        } else {
+          data.students.push(candidate);
+          summary.newStudents += 1;
+        }
+      });
+      saveData();
+      refreshApplicationUI();
+      showModal(
+        "CSV Import Complete",
+        `<p>New Students: <strong>${summary.newStudents}</strong></p><p>Updated Students: <strong>${summary.updatedStudents}</strong></p><p>Skipped/Duplicate: <strong>${summary.skippedDuplicates}</strong></p><p>Invalid Rows: <strong>${summary.invalidRows}</strong></p><p>Total Active Students: <strong>${data.students.length}</strong></p>`,
+        [{ label: "OK", action: "close", className: "primary" }]
+      );
+      toast("CSV import complete");
+    } catch (error) {
+      console.error(error);
+      toast("Unable to import CSV file.");
+    }
+  };
+  reader.readAsText(file);
+}
+function attachEvents() {
+  document.querySelectorAll(".nav").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".nav").forEach((navButton) => navButton.classList.remove("active"));
+      button.classList.add("active");
+      const page = button.dataset.page;
+      document.querySelectorAll(".page").forEach((section) => section.classList.toggle("active", section.id === page));
+      const pageTitle = document.getElementById("pageTitle");
+      if (pageTitle) pageTitle.textContent = button.textContent;
+    });
+  });
+  document.getElementById("saveSettings")?.addEventListener("click", () => {
+    const year = Number(document.getElementById("academicYear")?.value || new Date().getFullYear());
+    const target = Number(document.getElementById("targetPct")?.value || 75);
+    data.settings.year = year;
+    data.settings.target = target;
+    saveData();
+    refreshApplicationUI();
+    toast("Settings saved");
+  });
+  document.getElementById("generateStudents")?.addEventListener("click", () => {
+    generateStudents(document.getElementById("studentCount")?.value || 0);
+  });
+  document.getElementById("clearAllStudentsButton")?.addEventListener("click", openClearStudentsModal);
+  document.getElementById("clearData")?.addEventListener("click", showClearApplicationDataModal);
+  document.getElementById("backupCurrentData")?.addEventListener("click", backupCurrentData);
+  document.getElementById("restoreData")?.addEventListener("change", (event) => {
+    const file = event.target.files && event.target.files[0];
+    restoreBackup(file);
+    event.target.value = "";
+  });
+  document.getElementById("studentSearch")?.addEventListener("input", renderStudents);
+  document.getElementById("attendanceClass")?.addEventListener("change", renderMarkAttendance);
+  document.getElementById("attendanceSection")?.addEventListener("change", renderMarkAttendance);
+  document.getElementById("markAllPresent")?.addEventListener("click", () => markVisibleAttendance("present"));
+  document.getElementById("markAllAbsent")?.addEventListener("click", () => markVisibleAttendance("absent"));
+  document.getElementById("resetMarks")?.addEventListener("click", () => { document.querySelectorAll("#attendanceList .attendance-row").forEach((row) => { row.dataset.status = ""; row.querySelectorAll("[data-attendance-status]").forEach((button) => button.classList.remove("selected")); }); renderAttendanceCounters(); });
+  document.getElementById("saveAttendance")?.addEventListener("click", saveAttendanceSession);
+  document.getElementById("attendanceList")?.addEventListener("click", (event) => {
+    const statusButton = event.target.closest("[data-attendance-status]");
+    if (statusButton) {
+      const row = statusButton.closest(".attendance-row");
+      row.dataset.status = statusButton.dataset.attendanceStatus;
+      row.querySelectorAll("[data-attendance-status]").forEach((button) => button.classList.toggle("selected", button === statusButton));
+      renderAttendanceCounters();
+    }
+    if (event.target.closest("[data-go-students]")) document.querySelector('[data-page="students"]')?.click();
+  });
+  document.getElementById("studentForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = document.getElementById("studentName").value.trim();
+    if (!name) {
+      toast("Student name is required.");
+      return;
+    }
+    const entry = {
+      id: uid(),
+      studentId: document.getElementById("studentRoll").value ? `ST${document.getElementById("studentRoll").value}` : uid(),
+      rollNo: document.getElementById("studentRoll").value,
+      name,
+      className: document.getElementById("studentClass").value || "Class 11",
+      section: document.getElementById("studentSection").value || "A",
+      contact: document.getElementById("studentContact").value || "",
+      course: "",
+      isActive: true
+    };
+    data.students.push(entry);
+    saveData();
+    refreshApplicationUI();
+    event.target.reset();
+    toast("Student added");
+  });
+  document.getElementById("studentList")?.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    const action = button.dataset.action;
+    const studentId = button.dataset.studentId;
+    const person = findStudentById(studentId);
+    if (!person) return;
+    if (action === "delete-student") {
+      data.students = data.students.filter((student) => student.id !== studentId);
+      saveData();
+      refreshApplicationUI();
+      toast("Student deleted");
+    }
+    if (action === "toggle-student") {
+      person.isActive = person.isActive === false ? true : false;
+      saveData();
+      refreshApplicationUI();
+      toast(person.isActive ? "Student activated" : "Student deactivated");
+    }
+    if (action === "edit-student") {
+      document.getElementById("studentName").value = person.name || "";
+      document.getElementById("studentRoll").value = person.rollNo || "";
+      document.getElementById("studentClass").value = person.className || "";
+      document.getElementById("studentSection").value = person.section || "";
+      document.getElementById("studentContact").value = person.contact || "";
+      data.students = data.students.filter((student) => student.id !== person.id);
+      saveData();
+      refreshApplicationUI();
+      toast("Student details loaded for edit");
+    }
+  });
+  document.getElementById("importStudents")?.addEventListener("change", (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (file) importStudentsFromCsv(file);
+    event.target.value = "";
+  });
+  document.getElementById("prevMonth")?.addEventListener("click", () => {
+    monthDate = new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1);
+    renderCalendar();
+  });
+  document.getElementById("nextMonth")?.addEventListener("click", () => {
+    monthDate = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
+    renderCalendar();
+  });
+  document.getElementById("appModalActions")?.addEventListener("click", (event) => {
+    const actionEl = event.target.closest("button");
+    if (!actionEl) return;
+    handleModalAction(actionEl.dataset.action);
+  });
+  document.getElementById("studentCount") && (document.getElementById("studentCount").value = 30);
+  document.getElementById("academicYear") && (document.getElementById("academicYear").value = data.settings.year || new Date().getFullYear());
+  document.getElementById("targetPct") && (document.getElementById("targetPct").value = data.settings.target || 75);
+}
+function initApp() {
+  ensureDataShape();
+  attachEvents();
+  refreshApplicationUI();
+  setStatus("● Data saved", "saved");
+}
+document.addEventListener("DOMContentLoaded", initApp);
+window.data = data;
+window.refreshApplicationUI = refreshApplicationUI;
+window.saveAllData = saveAllData;
+window.backupCurrentData = backupCurrentData;
+window.restoreBackup = restoreBackup;
+window.generateStudents = generateStudents;
+window.importStudentsFromCsv = importStudentsFromCsv;
+window.clearActiveStudents = clearActiveStudents;
+window.clearAllApplicationData = clearAllApplicationData;
